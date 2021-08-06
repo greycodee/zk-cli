@@ -5,8 +5,8 @@ import "github.com/greycodee/zk-cli/tui"
 func main()  {
 	//fmt.Println("hello world")
 
-	err := tui.Start()
+	err := tui.NewTUI()
 	if err != nil {
-		return 
+		panic(err)
 	}
 }
