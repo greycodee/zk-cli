@@ -5,74 +5,101 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/greycodee/zk-cli/core"
+	"github.com/greycodee/zk-cli/log"
 	"github.com/rivo/tview"
 	"github.com/samuel/go-zookeeper/zk"
+	"net/url"
 	"path/filepath"
 )
 
 type TUI struct {
 	treeView *tview.TreeView
+	treeRootNode *tview.TreeNode
 	stateView *tview.TextView
 	dataView *tview.TextView
+	reFlushBtn *tview.Button
+
+	tuiLog *log.Log
 	zkClient *core.ZK
+
+	currPath string
+	zkHost string
+
 }
 
-func NewTUI() (err error) {
-	client, err := core.NewZKClient("127.0.0.1:2181")
-	if err != nil {
-		return
-	}
+const root = "/"
 
-	tui := TUI{
-		zkClient: client,
-	}
+func NewTUI() *TUI{
+	tui := TUI{}
+
 	tui.initTreeView()
 	tui.initStateView()
 	tui.initDataView()
+	tui.initReFlushBtn()
+
+	return &tui
+}
+
+func (tui *TUI) Run(zkHost string)  {
+	tui.tuiLog = log.NewLogs()
+	client := core.NewZKClient(zkHost,tui.tuiLog)
+
+	tui.zkClient = client
+	tui.zkHost = zkHost
+
+	tui.addTreeNode(tui.treeRootNode,root)
+
+	leftLayout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(tui.reFlushBtn,3,0,false).
+		AddItem(tui.treeView,0,2,true)
 
 	rightLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(tui.stateView,13,0,false).
-		AddItem(tui.dataView,0,3,false)
+		AddItem(tui.stateView,0,1,false).
+		AddItem(tui.dataView,0,1,false)
 
-	mainLayout := tview.NewFlex().
-		AddItem(tui.treeView,0,2,true).
+	mainView := tview.NewFlex().
+		AddItem(leftLayout,0,2,true).
 		AddItem(rightLayout,0,3,false)
-	err = tview.NewApplication().SetRoot(mainLayout, true).EnableMouse(true).Run()
+
+	err := tview.NewApplication().SetRoot(mainView, true).EnableMouse(true).Run()
 	if err != nil {
-		return
+		panic(err)
 	}
-	return
+
 }
 
 func (tui *TUI) treeSelectedFunc(node *tview.TreeNode)  {
 	reference := node.GetReference()
 	if reference == nil {
-		return // Selecting the root node does nothing.
+		return
 	}
 	children := node.GetChildren()
 
 	path := reference.(string)
-	_, stat, err := tui.zkClient.GetData(path)
+	unescape, err := url.QueryUnescape(path)
 	if err != nil {
-		panic(err)
+		return
 	}
 
+	tui.currPath = unescape
+	data, stat := tui.zkClient.GetData(path)
+
+	tui.stateView.Clear()
+	tui.dataView.Clear()
+
 	tui.setDataViewText(stat)
-	tui.dataView.SetText(fmt.Sprintf("%d",node.GetLevel()))
+	tui.dataView.SetText(data)
 
 	if len(children) == 0 {
 		tui.addTreeNode(node, path)
-	} else {
+	}else {
 		node.SetExpanded(!node.IsExpanded())
-
 	}
 }
 
 func (tui *TUI) addTreeNode(target *tview.TreeNode, path string) {
-	list,_,err := tui.zkClient.Children(path)
-	if err != nil {
-		panic(err)
-	}
+	list,_ := tui.zkClient.Children(path)
+
 	for _, n := range list {
 
 		flag := tui.zkClient.HaveChildren(filepath.Join(path, n))
@@ -86,16 +113,13 @@ func (tui *TUI) addTreeNode(target *tview.TreeNode, path string) {
 }
 
 func (tui *TUI) initTreeView()  {
-	rootDir := "/"
-	root := tview.NewTreeNode(rootDir).
+	tui.treeRootNode = tview.NewTreeNode(root).
 		SetColor(tcell.ColorRed)
 	tree := tview.NewTreeView().
-		SetRoot(root).
-		SetCurrentNode(root)
+		SetRoot(tui.treeRootNode).
+		SetCurrentNode(tui.treeRootNode)
 	tree.SetSelectedFunc(tui.treeSelectedFunc)
 	tree.SetTitle("节点").SetBorder(true)
-
-	tui.addTreeNode(root,rootDir)
 
 	tui.treeView = tree
 }
@@ -114,40 +138,45 @@ func (tui *TUI) initDataView()  {
 	tui.dataView = dataView
 }
 
+func (tui *TUI) initReFlushBtn()  {
+	btn := tview.NewButton("刷新当前节点")
+	btn.SetBorder(true)
+	btn.SetSelectedFunc(tui.flush)
+
+	tui.reFlushBtn = btn
+}
+
 func (tui *TUI) setDataViewText(state *zk.Stat)  {
 	str := bytes.Buffer{}
-	str.WriteString("cZxid：")
-	str.WriteString(fmt.Sprintf("%d",state.Czxid))
-	str.WriteString("\n")
-	str.WriteString("ctime：")
-	str.WriteString(fmt.Sprintf("%d",state.Ctime))
-	str.WriteString("\n")
-	str.WriteString("mZxid：")
-	str.WriteString(fmt.Sprintf("%d",state.Mzxid))
-	str.WriteString("\n")
-	str.WriteString("mtime：")
-	str.WriteString(fmt.Sprintf("%d",state.Mtime))
-	str.WriteString("\n")
-	str.WriteString("pZxid：")
-	str.WriteString(fmt.Sprintf("%d",state.Pzxid))
-	str.WriteString("\n")
-	str.WriteString("cversion：")
-	str.WriteString(fmt.Sprintf("%d",state.Cversion))
-	str.WriteString("\n")
-	str.WriteString("dataVersion：")
-	str.WriteString(fmt.Sprintf("%d",state.Version))
-	str.WriteString("\n")
-	str.WriteString("aclVersion：")
-	str.WriteString(fmt.Sprintf("%d",state.Aversion))
-	str.WriteString("\n")
-	str.WriteString("ephemeralOwner：")
-	str.WriteString(fmt.Sprintf("%d",state.EphemeralOwner))
-	str.WriteString("\n")
-	str.WriteString("dataLength：")
-	str.WriteString(fmt.Sprintf("%d",state.DataLength))
-	str.WriteString("\n")
-	str.WriteString("numChildren：")
-	str.WriteString(fmt.Sprintf("%d",state.NumChildren))
-	str.WriteString("\n")
+	str.WriteString(fmt.Sprintf("cZxid：%d\n",state.Czxid))
+	str.WriteString(fmt.Sprintf("ctime：%d\n",state.Ctime))
+	str.WriteString(fmt.Sprintf("mZxid：%d\n",state.Mzxid))
+	str.WriteString(fmt.Sprintf("mtime：%d\n",state.Mtime))
+	str.WriteString(fmt.Sprintf("pZxid：%d\n",state.Pzxid))
+	str.WriteString(fmt.Sprintf("cversion：%d\n",state.Cversion))
+	str.WriteString(fmt.Sprintf("dataVersion：%d\n",state.Version))
+	str.WriteString(fmt.Sprintf("aclVersion：%d\n",state.Aversion))
+	str.WriteString(fmt.Sprintf("ephemeralOwner：%d\n",state.EphemeralOwner))
+	str.WriteString(fmt.Sprintf("dataLength：%d\n",state.DataLength))
+	str.WriteString(fmt.Sprintf("numChildren：%d\n",state.NumChildren))
+
+	str.WriteString(fmt.Sprintf("zk服务地址：%s\n",tui.zkHost))
+	str.WriteString(fmt.Sprintf("当前路径：%s\n",tui.currPath))
 	tui.stateView.SetText(str.String())
+}
+
+func (tui *TUI) flush(){
+	currNode := tui.treeView.GetCurrentNode()
+	if currNode.GetText() != root {
+		reference := tui.treeView.GetCurrentNode().GetReference()
+		path := reference.(string)
+		currNode.ClearChildren()
+		tui.addTreeNode(currNode,path)
+
+		data, stat := tui.zkClient.GetData(path)
+		tui.stateView.Clear()
+		tui.dataView.Clear()
+		tui.setDataViewText(stat)
+		tui.dataView.SetText(data)
+	}
 }

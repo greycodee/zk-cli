@@ -1,12 +1,16 @@
 package main
 
-import "github.com/greycodee/zk-cli/tui"
+import (
+	"flag"
+	"github.com/greycodee/zk-cli/tui"
+)
+
+var host = flag.String("h","127.0.0.1:2181","zookeeper server address")
+
+func init() {
+	flag.Parse()
+}
 
 func main()  {
-	//fmt.Println("hello world")
-
-	err := tui.NewTUI()
-	if err != nil {
-		panic(err)
-	}
+	tui.NewTUI().Run(*host)
 }
