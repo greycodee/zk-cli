@@ -14,7 +14,7 @@ git clone https://github.com/greycodee/zk-cli.git
 go build .
 ```
 
-你也可以直接到[发布页面](https://github.com/greycodee/zk-cli/releases)下载对于系统的压缩包，解压后即可使用。
+你也可以直接到[发布页面](https://github.com/greycodee/zk-cli/releases)下载对应系统的压缩包，解压后即可使用。
 
 
 ## 界面错乱解决办法
